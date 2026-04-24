@@ -17,7 +17,10 @@ import camelot
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 from supabase import create_client, Client
+
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # Config
