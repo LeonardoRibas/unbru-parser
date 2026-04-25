@@ -204,6 +204,14 @@ def get_supabase_client() -> Client:
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
+def delete_old_rows(client: Client, campus: str) -> None:
+    """Delete rows with dates strictly before today from the campus table."""
+    today = datetime.date.today().isoformat()
+    res = client.table(campus).delete().lt("date", today).execute()
+    count = len(res.data) if res.data else 0
+    log.info("Deleted %d old rows (before %s) from table '%s'", count, today, campus)
+
+
 def upsert_to_supabase(client: Client, campus: str, df: pd.DataFrame) -> None:
     """Upsert menu rows into the campus-specific Supabase table.
 
@@ -258,6 +266,7 @@ def main():
 
     for campus, tbl in tables.items():
         log.info("Processing campus: %s", campus)
+        delete_old_rows(sb, campus)
         df = table_to_dataframe(tbl)
         upsert_to_supabase(sb, campus, df)
 
