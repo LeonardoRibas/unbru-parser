@@ -2,8 +2,8 @@ name: Update RU Menu
 
 on:
   schedule:
-    # Every Monday at 09:00 UTC (06:00 BRT)
-    - cron: "0 9 * * 1"
+    # Saturday, Sunday and Monday at 09:00 UTC (06:00 BRT)
+    - cron: "0 9 * * 0,1,6"
   workflow_dispatch: # Allow manual trigger
 
 jobs:
