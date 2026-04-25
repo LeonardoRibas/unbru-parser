@@ -60,15 +60,27 @@ def extract_campus_names(soup: BeautifulSoup) -> list[str]:
     return names
 
 
-def current_week_date_prefix() -> str:
-    """Return a date prefix string (DD/MM) for the Monday of the current week.
+def latest_date_prefix(soup: BeautifulSoup) -> str | None:
+    """Return the most recent date prefix (DD/MM) found across menu links.
 
-    The site labels each menu link with the week start date.  We compute
-    the Monday of the current ISO week so the filter works automatically.
+    The site labels each menu link with a date range like '20/04 A 26/04'.
+    We extract all DD/MM patterns and return the latest one so the script
+    always fetches the newest available menu.
     """
-    today = datetime.date.today()
-    monday = today - datetime.timedelta(days=today.weekday())
-    return monday.strftime("%d/%m")
+    links = soup.find("main").find_all("a")
+    dates: list[tuple[int, int, str]] = []  # (month, day, prefix)
+    for link in links:
+        if not link.contents or not link.string or link.string == "I":
+            continue
+        # Match the first DD/MM in the link text (week start date)
+        m = re.search(r"(\d{2})/(\d{2})", link.string)
+        if m:
+            day, month = int(m.group(1)), int(m.group(2))
+            dates.append((month, day, m.group(0)))
+    if not dates:
+        return None
+    # Latest by (month, day)
+    return max(dates, key=lambda x: (x[0], x[1]))[2]
 
 
 def download_pdf(url: str, dest: str) -> None:
@@ -226,12 +238,15 @@ def main():
     campus_names = extract_campus_names(soup)
     log.info("Found campuses: %s", campus_names)
 
-    date_prefix = current_week_date_prefix()
-    log.info("Filtering menus for week starting %s", date_prefix)
+    date_prefix = latest_date_prefix(soup)
+    if date_prefix:
+        log.info("Latest menu found for week starting %s", date_prefix)
+    else:
+        log.warning("Could not determine latest date prefix — fetching all links")
 
     tables = fetch_tables(soup, campus_names, date_prefix=date_prefix)
 
-    if not tables:
+    if not tables and date_prefix:
         log.warning("No menus found for prefix %s — retrying without date filter", date_prefix)
         tables = fetch_tables(soup, campus_names, date_prefix=None)
 
