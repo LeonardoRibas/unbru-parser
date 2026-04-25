@@ -204,12 +204,26 @@ def get_supabase_client() -> Client:
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
-def delete_old_rows(client: Client, campus: str) -> None:
-    """Delete rows with dates strictly before today from the campus table."""
-    today = datetime.date.today().isoformat()
-    res = client.table(campus).delete().lt("date", today).execute()
+def delete_old_rows(client: Client, campus: str, menu_start: str) -> None:
+    """Delete rows with dates before the cutoff from the campus table.
+
+    *menu_start* is the DD/MM start date of the newest menu.
+    - If the menu week has already started (start date <= today), delete
+      everything before that Monday.
+    - Otherwise (menu is for a future week), delete everything before today.
+    """
+    today = datetime.date.today()
+    year = today.year
+    menu_start_date = datetime.datetime.strptime(f"{menu_start}/{year}", "%d/%m/%Y").date()
+
+    if menu_start_date <= today:
+        cutoff = menu_start_date
+    else:
+        cutoff = today
+
+    res = client.table(campus).delete().lt("date", cutoff.isoformat()).execute()
     count = len(res.data) if res.data else 0
-    log.info("Deleted %d old rows (before %s) from table '%s'", count, today, campus)
+    log.info("Deleted %d old rows (before %s) from table '%s'", count, cutoff.isoformat(), campus)
 
 
 def upsert_to_supabase(client: Client, campus: str, df: pd.DataFrame) -> None:
@@ -266,7 +280,7 @@ def main():
 
     for campus, tbl in tables.items():
         log.info("Processing campus: %s", campus)
-        delete_old_rows(sb, campus)
+        delete_old_rows(sb, campus, date_prefix)
         df = table_to_dataframe(tbl)
         upsert_to_supabase(sb, campus, df)
 
