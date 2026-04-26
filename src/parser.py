@@ -17,6 +17,8 @@ import camelot
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
@@ -44,9 +46,24 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def _build_session() -> requests.Session:
+    """Build a requests Session with retry + backoff."""
+    session = requests.Session()
+    retries = Retry(
+        total=5,
+        backoff_factor=2,
+        status_forcelist=[500, 502, 503, 504],
+    )
+    adapter = HTTPAdapter(max_retries=retries)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
 def fetch_menu_page() -> BeautifulSoup:
     """Download and parse the menu index page."""
-    resp = requests.get(MENU_PAGE_URL, verify=False, timeout=30)
+    session = _build_session()
+    resp = session.get(MENU_PAGE_URL, verify=False, timeout=60)
     resp.raise_for_status()
     return BeautifulSoup(resp.text, "html.parser")
 
@@ -85,7 +102,8 @@ def latest_date_prefix(soup: BeautifulSoup) -> str | None:
 
 def download_pdf(url: str, dest: str) -> None:
     """Download a PDF from *url* and write it to *dest*."""
-    resp = requests.get(url, verify=False, timeout=60)
+    session = _build_session()
+    resp = session.get(url, verify=False, timeout=60)
     resp.raise_for_status()
     with open(dest, "wb") as f:
         f.write(resp.content)
