@@ -29,7 +29,7 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 
 RU_BASE_URL = "https://ru.unb.br"
-MENU_PAGE_URL = RU_BASE_URL + "/index.php/cardapio-refeitorio"
+MENU_PAGE_URL = RU_BASE_URL + "/cardapio-refeitorio/"
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
