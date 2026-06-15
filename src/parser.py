@@ -71,9 +71,9 @@ def fetch_menu_page() -> BeautifulSoup:
 def extract_campus_names(soup: BeautifulSoup) -> list[str]:
     """Return the ordered list of campus names from the page."""
     names = []
-    for tag in soup("strong"):
+    for tag in soup.find_all("h3",class_="elementor-heading-title elementor-size-default"):
         if isinstance(tag.contents[0], str):
-            names.append(tag.string)
+            names.append(tag.string.replace("Cardápio ", "").replace("Água Limpa", "").strip())
     return names
 
 
@@ -84,10 +84,11 @@ def latest_date_prefix(soup: BeautifulSoup) -> str | None:
     We extract all DD/MM patterns and return the latest one so the script
     always fetches the newest available menu.
     """
-    links = soup.find("main").find_all("a")
+    links = soup.find("main").select("p a")
+    log.info("Links found: %s", links)
     dates: list[tuple[int, int, str]] = []  # (month, day, prefix)
     for link in links:
-        if not link.contents or not link.string or link.string == "I":
+        if not link.contents or not link.string:
             continue
         # Match the first DD/MM in the link text (week start date)
         m = re.search(r"(\d{2})/(\d{2})", link.string)
@@ -115,7 +116,7 @@ def fetch_tables(soup: BeautifulSoup, campus_names: list[str], date_prefix: str 
     If *date_prefix* is ``None`` every available link is fetched;
     otherwise only links whose text contains the prefix are used.
     """
-    links = soup.find("main").find_all("a")
+    links = soup.find("main").select("p a")
     tables: dict[str, list] = {}
     idx = 0
 
@@ -129,7 +130,7 @@ def fetch_tables(soup: BeautifulSoup, campus_names: list[str], date_prefix: str 
             break
 
         campus = campus_names[idx]
-        pdf_url = RU_BASE_URL + link.attrs["href"]
+        pdf_url = link.attrs["href"]
         log.info("Downloading menu for %s: %s", campus, pdf_url)
 
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
@@ -276,7 +277,6 @@ def main():
 
     soup = fetch_menu_page()
     campus_names = extract_campus_names(soup)
-    log.info("Found campuses: %s", campus_names)
 
     date_prefix = latest_date_prefix(soup)
     if date_prefix:
