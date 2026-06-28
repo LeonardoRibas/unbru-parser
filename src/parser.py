@@ -78,28 +78,24 @@ def extract_campus_names(soup: BeautifulSoup) -> list[str]:
 
 
 def latest_date_prefix(soup: BeautifulSoup) -> str | None:
-    """Return the most recent date prefix (DD/MM) found across menu links.
-
-    The site labels each menu link with a date range like '20/04 A 26/04'.
-    We extract all DD/MM patterns and return the latest one so the script
-    always fetches the newest available menu.
-    """
     links = soup.find("main").select("p a")
-    log.info("Links found: %s", links)
-    dates: list[tuple[int, int, str]] = []  # (month, day, prefix)
+    dates: list[tuple[int, int, str]] = []
+    
     for link in links:
-        if not link.contents or not link.string:
+        # get_text() extrai o texto mesmo se estiver dentro de <strong> ou <span>
+        text = link.get_text(strip=True)
+        if not text:
             continue
-        # Match the first DD/MM in the link text (week start date)
-        m = re.search(r"(\d{2})/(\d{2})", link.string)
+            
+        m = re.search(r"(\d{1,2})/(\d{1,2})", text)
         if m:
             day, month = int(m.group(1)), int(m.group(2))
             dates.append((month, day, m.group(0)))
+            
     if not dates:
         return None
-    # Latest by (month, day)
+        
     return max(dates, key=lambda x: (x[0], x[1]))[2]
-
 
 def download_pdf(url: str, dest: str) -> None:
     """Download a PDF from *url* and write it to *dest*."""
@@ -111,20 +107,19 @@ def download_pdf(url: str, dest: str) -> None:
 
 
 def fetch_tables(soup: BeautifulSoup, campus_names: list[str], date_prefix: str | None = None):
-    """Download PDFs and extract camelot tables keyed by campus name.
-
-    If *date_prefix* is ``None`` every available link is fetched;
-    otherwise only links whose text contains the prefix are used.
-    """
     links = soup.find("main").select("p a")
     tables: dict[str, list] = {}
     idx = 0
 
     for link in links:
-        if not link.contents or not link.string or link.string == "I":
+        # Usamos get_text() aqui também para garantir o match com a data
+        text = link.get_text(strip=True)
+        if not text or text == "I":
             continue
-        if date_prefix and date_prefix not in link.string:
+            
+        if date_prefix and date_prefix not in text:
             continue
+            
         if idx >= len(campus_names):
             log.warning("More menu links than campus names — skipping extras.")
             break
@@ -183,13 +178,20 @@ def table_to_dataframe(table) -> pd.DataFrame:
         table[i].df.index = table[i].df[1]
         table[i].df = table[i].df.drop(1, axis=1)
 
-    raw_dates = re.findall(r"\d\d.\d\d.\d\d\d\d", table[0].df.to_string())
-    dates = [
-        datetime.datetime.strptime(d.replace("/", ""), "%d%m%Y").strftime("%Y-%m-%d")
-        for d in raw_dates
-    ]
+    # 1. Nova regex aceitando 1 ou 2 dígitos e delimitadores flexíveis
+    raw_dates = re.findall(r"\d{1,2}[/.-]\d{1,2}[/.-]\d{4}", table[0].df.to_string())
+    
+    # 2. Nova lógica de conversão segura
+    dates = []
+    for d in raw_dates:
+        # Padroniza qualquer separador acidental para '/' e faz o parse
+        d_clean = d.replace(".", "/").replace("-", "/")
+        parsed_date = datetime.datetime.strptime(d_clean, "%d/%m/%Y")
+        dates.append(parsed_date.strftime("%Y-%m-%d"))
+        
     num_days = len(dates)
 
+    # (O restante do seu código a partir daqui continua igual...)
     desjejum = _extract_meal(table[0], remove_items=["Café OU chá", "Café ou chá"]) if len(table) > 0 else []
     almoco = _extract_meal(table[1]) if len(table) > 1 else []
     jantar = _extract_meal(table[2]) if len(table) > 2 else []
@@ -199,9 +201,15 @@ def table_to_dataframe(table) -> pd.DataFrame:
         if len(meal) < num_days:
             meal.extend([empty] * (num_days - len(meal)))
 
-    desjejum = desjejum[-num_days:]
-    almoco = almoco[-num_days:]
-    jantar = jantar[-num_days:]
+    # Nota: como num_days agora reflete corretamente os dias encontrados,
+    # caso as datas falhem (num_days=0), o slice [-0:] do Python retornará
+    # a lista inteira, mas limitamos isso com uma checagem de segurança opcional:
+    if num_days > 0:
+        desjejum = desjejum[-num_days:]
+        almoco = almoco[-num_days:]
+        jantar = jantar[-num_days:]
+    else:
+        log.warning("Nenhuma data encontrada na tabela do PDF.")
 
     return pd.DataFrame({
         "date": dates,
@@ -209,7 +217,6 @@ def table_to_dataframe(table) -> pd.DataFrame:
         "almoco": almoco,
         "jantar": jantar,
     })
-
 
 # ---------------------------------------------------------------------------
 # Supabase upload
@@ -223,20 +230,15 @@ def get_supabase_client() -> Client:
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
-def delete_old_rows(client: Client, campus: str, menu_start: str) -> None:
-    """Delete rows with dates before the cutoff from the campus table.
-
-    *menu_start* is the DD/MM start date of the newest menu.
-    - If the menu week has already started (start date <= today), delete
-      everything before that Monday.
-    - Otherwise (menu is for a future week), delete everything before today.
-    """
+def delete_old_rows(client: Client, campus: str, menu_start: str | None) -> None:
+    """Delete rows with dates before the cutoff from the campus table."""
     today = datetime.date.today()
-    year = today.year
-    menu_start_date = datetime.datetime.strptime(f"{menu_start}/{year}", "%d/%m/%Y").date()
-
-    if menu_start_date <= today:
-        cutoff = menu_start_date
+    
+    # Esta é a trava que impede o erro "None/2026"
+    if menu_start:
+        year = today.year
+        menu_start_date = datetime.datetime.strptime(f"{menu_start}/{year}", "%d/%m/%Y").date()
+        cutoff = menu_start_date if menu_start_date <= today else today
     else:
         cutoff = today
 
